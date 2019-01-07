@@ -23,6 +23,7 @@
 package si.mazi.rescu;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.vertx.core.http.HttpClient;
 import oauth.signpost.OAuthConsumer;
 import si.mazi.rescu.serialization.jackson.DefaultJacksonObjectMapperFactory;
 import si.mazi.rescu.serialization.jackson.JacksonConfigureListener;
@@ -48,6 +49,7 @@ public class ClientConfig {
     private boolean ignoreHttpErrorCodes;
     private boolean wrapUnexpectedExceptions;
     private OAuthConsumer oAuthConsumer;
+    private HttpClient httpClient;
 
     public ClientConfig() {
         httpConnTimeout = Config.getHttpConnTimeout();
@@ -56,6 +58,14 @@ public class ClientConfig {
         proxyHost = Config.getProxyHost();
         ignoreHttpErrorCodes = Config.isIgnoreHttpErrorCodes();
         wrapUnexpectedExceptions = Config.isWrapUnexpectedExceptions();
+    }
+
+    public void setHttpClient(HttpClient httpClient) {
+        this.httpClient = httpClient;
+    }
+
+    public HttpClient getHttpClient() {
+        return this.httpClient;
     }
 
     public ClientConfig addDefaultParam(Class<? extends Annotation> paramType, String paramName, Object paramValue) {

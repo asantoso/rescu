@@ -21,7 +21,13 @@
  */
 package si.mazi.rescu;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.vertx.core.Handler;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpClient;
+import io.vertx.core.http.HttpClientRequest;
+import io.vertx.core.http.HttpClientResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import si.mazi.rescu.serialization.PlainTextResponseReader;
@@ -34,9 +40,11 @@ import si.mazi.rescu.serialization.jackson.JacksonResponseReader;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
+
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
+import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,7 +58,7 @@ public class RestInvocationHandler implements InvocationHandler {
     private final ResponseReaderResolver responseReaderResolver;
     private final RequestWriterResolver requestWriterResolver;
 
-    private final HttpTemplate httpTemplate;
+    // private final HttpTemplate httpTemplate;
     private final String intfacePath;
     private final String baseUrl;
     private final ClientConfig config;
@@ -91,39 +99,86 @@ public class RestInvocationHandler implements InvocationHandler {
                 new PlainTextResponseReader(this.config.isIgnoreHttpErrorCodes()));
 
                 //setup http client
-        this.httpTemplate = new HttpTemplate(
-                this.config.getHttpConnTimeout(),
-                this.config.getHttpReadTimeout(),
-                this.config.getProxyHost(), this.config.getProxyPort(),
-                this.config.getSslSocketFactory(), this.config.getHostnameVerifier(), this.config.getOAuthConsumer());
+//        this.httpTemplate = new HttpTemplate(
+//                this.config.getHttpConnTimeout(),
+//                this.config.getHttpReadTimeout(),
+//                this.config.getProxyHost(), this.config.getProxyPort(),
+//                this.config.getSslSocketFactory(), this.config.getHostnameVerifier(), this.config.getOAuthConsumer());
     }
 
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        HttpClient httpClient = this.config.getHttpClient();
+        if (null == httpClient) {
+            String msg = "[RestInvocationHandler] httpclient is null";
+            try {
+                String thName = Thread.currentThread().getName();
+                throw new RuntimeException(thName+" -- " + msg);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            throw new RuntimeException(msg);
+        }
+
         if (method.getDeclaringClass().equals(Object.class)) {
             return method.invoke(this, args);
         }
 
         RestMethodMetadata methodMetadata = getMetadata(method);
+        methodMetadata.getParameterAnnotations();
 
-        HttpURLConnection connection = null;
-        RestInvocation invocation = null;
-        Object lock = getValueGenerator(args);
-        if (lock == null) {
-            lock = new Object(); // effectively no locking
+        final Handler handler;
+        if (args[args.length - 1] instanceof Handler) {
+            handler = (Handler) args[args.length - 1];
+        } else {
+            handler = null;
         }
+
+        // HttpURLConnection connection = null;
+
+        RestInvocation invocation = null;
+//        Object lock = getValueGenerator(args);
+//        if (lock == null) {
+//            lock = new Object(); // effectively no locking
+//        }
         try {
-            synchronized (lock) {
+            // synchronized (lock) {
+                long fetchStartTs = 0;
+                Handler<HttpClientResponse> httpRespHandler = httpResp -> {
+                    if (httpResp.statusCode() != 200) {
+                        System.err.println("fail");
+                    }
+                    httpResp.bodyHandler(buffer -> {
+                        final long elapsedMillis = System.currentTimeMillis() - fetchStartTs;
+                        System.out.println(String.format("# [RestInvocationHandler] elapsed:[%d] len:%s", elapsedMillis, buffer.length()));
+
+                        String respBody = buffer.getString(0, buffer.length());
+                        System.out.println("# [RestInvocationHandler] resp:" + respBody);
+
+                        InvocationResult invocationResult = new InvocationResult(respBody, httpResp.statusCode());
+                        try {
+                            Object resp = mapInvocationResult(invocationResult, methodMetadata);
+                            if (null != handler) {
+                                handler.handle(resp);
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                };
                 invocation = createInvocation(method, args);
-                connection = invokeHttp(invocation);
-            }
-            final Object result = receiveAndMap(methodMetadata, connection);
-            makeAware(result, connection, invocation);
-            return result;
+                invokeHttp(invocation, httpRespHandler);
+            // }
+
+            // final Object result = receiveAndMap(methodMetadata, connection);
+
+            /** FOR TESTING ? */
+            // makeAware(result, connection, invocation);
+            return null;
         } catch (Exception e) {
-            final boolean madeAware = makeAware(e, connection, invocation);
-            if (config.isWrapUnexpectedExceptions() && !madeAware) {
-                throw new AwareException(e, invocation);
-            }
+            // final boolean madeAware = makeAware(e, connection, invocation);
+//            if (config.isWrapUnexpectedExceptions() && !madeAware) {
+//                throw new AwareException(e, invocation);
+//            }
             throw e;
         }
     }
@@ -149,19 +204,37 @@ public class RestInvocationHandler implements InvocationHandler {
         return madeAware;
     }
 
-    protected HttpURLConnection invokeHttp(RestInvocation invocation) throws IOException {
+    protected void invokeHttp(RestInvocation invocation, Handler<HttpClientResponse> handler) throws IOException {
         RestMethodMetadata methodMetadata = invocation.getMethodMetadata();
 
         RequestWriter requestWriter = requestWriterResolver.resolveWriter(invocation.getMethodMetadata());
         final String requestBody = requestWriter.writeBody(invocation);
 
-        return httpTemplate.send(invocation.getInvocationUrl(), requestBody, invocation.getAllHttpHeaders(), methodMetadata.getHttpMethod());
+        HttpMethod method = methodMetadata.getHttpMethod();
+        io.vertx.core.http.HttpMethod vertxMethod = io.vertx.core.http.HttpMethod.valueOf(method.name());
+
+        Map<String, String> headers = invocation.getHttpHeadersFromParams();
+
+        HttpClient client = this.config.getHttpClient();
+        HttpClientRequest request = client.requestAbs(vertxMethod, invocation.getInvocationUrl());
+        request.handler(handler);
+
+        for (String hk : headers.keySet()) {
+            request.putHeader(hk, headers.get(hk));
+        }
+        int contentLength = (requestBody == null)? 0 : requestBody.length();
+        request.putHeader("Content-Length", Integer.toString(contentLength));
+        if (contentLength > 0) {
+            request.end(Buffer.buffer(requestBody.getBytes(Charset.forName("UTF-8"))));
+        }
+
+        // return httpTemplate.send(invocation.getInvocationUrl(), requestBody, invocation.getAllHttpHeaders(), methodMetadata.getHttpMethod());
     }
 
-    protected Object receiveAndMap(RestMethodMetadata methodMetadata, HttpURLConnection connection) throws IOException {
-        InvocationResult invocationResult = httpTemplate.receive(connection);
-        return mapInvocationResult(invocationResult, methodMetadata);
-    }
+//    protected Object receiveAndMap(RestMethodMetadata methodMetadata, HttpURLConnection connection) throws IOException {
+//        InvocationResult invocationResult = httpTemplate.receive(connection);
+//        return mapInvocationResult(invocationResult, methodMetadata);
+//    }
 
     private static SynchronizedValueFactory getValueGenerator(Object[] args) {
         if (args != null) for (Object arg : args)

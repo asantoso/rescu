@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.List;
@@ -84,6 +85,22 @@ public class RestMethodMetadata implements Serializable {
                 = AnnotationUtils.getMethodAnnotationMap(method,
                         RestInvocation.PARAM_ANNOTATION_CLASSES);
         Annotation[][] parameterAnnotations = method.getParameterAnnotations();
+
+        /** asantoso
+         *
+         *  find the response type
+         **/
+
+        Type responseType = null; // method.getGenericReturnType();
+
+        Type[] types = method.getGenericParameterTypes();
+        //Now assuming that the first parameter to the method is of type List<Integer>
+        ParameterizedType lastParamType = (ParameterizedType) types[types.length - 1];
+        responseType = lastParamType.getActualTypeArguments()[0];
+        System.out.println("RestMethodMetaData PARSED RESPONSE TYPE = " + responseType);
+
+        //
+
         Consumes consumes = AnnotationUtils.getFromMethodOrClass(method, Consumes.class);
         String reqContentType = consumes != null ? consumes.value()[0] : null;
         Produces produces = AnnotationUtils.getFromMethodOrClass(method, Produces.class);
@@ -111,7 +128,7 @@ public class RestMethodMetadata implements Serializable {
             log.warn("{} request declared as consuming method body as {}. While body is allowed, it should be ignored by the server. Is this intended? Method: {}", httpMethod, reqContentType, method);
         }
 
-        return new RestMethodMetadata(method.getGenericReturnType(), httpMethod,
+        return new RestMethodMetadata(responseType, httpMethod,
                 baseUrl, intfacePath, methodPathTemplate, exceptionType,
                 reqContentType, resContentType, methodName, methodAnnotationMap, parameterAnnotations);
     }

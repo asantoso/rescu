@@ -22,6 +22,8 @@
 package si.mazi.rescu;
 
 
+import io.vertx.core.Handler;
+import io.vertx.core.http.HttpClientResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,8 +61,12 @@ public class RestInvocation implements Serializable {
     private final String queryString;
     private final String path;
     private final RequestWriter requestWriter;
-
     private Map<String, String> allHttpHeaders;
+
+    /** asantoso */
+//    Handler handler;
+//    public void setHandler(Handler<HttpClientResponse> handler) { this.handler = handler; }
+//    public Handler<HttpClientResponse> getHandler() { return this.handler; }
 
     public RestInvocation(Map<Class<? extends Annotation>, Params> paramsMap,
             List<Object> unannanotatedParams,
@@ -141,6 +147,11 @@ public class RestInvocation implements Serializable {
             if (param instanceof ParamsDigest) {
                 unannanotatedParams.set(i, ((ParamsDigest) param).digestParams(invocation));
             }
+            /** asantoso **/
+//            else if (param instanceof Handler) {
+//                Handler handler = ((Handler) param);
+//                invocation.setHandler(handler);
+//            }
         }
 
         for (Params params : paramsMap.values()) {
