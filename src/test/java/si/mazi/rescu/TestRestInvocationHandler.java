@@ -48,13 +48,11 @@ class TestRestInvocationHandler extends RestInvocationHandler {
         this.responseBody = responseBody;
     }
 
-    @Override
     protected HttpURLConnection invokeHttp(RestInvocation invocation) {
         this.invocation = invocation;
         return null;
     }
 
-    @Override
     protected Object receiveAndMap(RestMethodMetadata methodMetadata, HttpURLConnection connection) throws IOException {
         InvocationResult invocationResult = new InvocationResult(getResponseBody(), getResponseStatusCode());
         return mapInvocationResult(invocationResult, methodMetadata);
