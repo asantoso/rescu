@@ -25,9 +25,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
-import io.vertx.core.http.HttpClient;
-import io.vertx.core.http.HttpClientRequest;
-import io.vertx.core.http.HttpClientResponse;
+import io.vertx.core.http.*;
+import io.vertx.core.net.ProxyOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import si.mazi.rescu.serialization.PlainTextResponseReader;
@@ -59,13 +58,22 @@ public class RestInvocationHandler implements InvocationHandler {
     private final RequestWriterResolver requestWriterResolver;
 
     // private final HttpTemplate httpTemplate;
-    private final String intfacePath;
-    private final String baseUrl;
-    private final ClientConfig config;
+    private String intfacePath;
+    private String baseUrl;
+    private ClientConfig config;
+    private HttpClient httpClient;
+    private HttpClientOptions httpClientOptions;
+
+    public HttpClient getHttpClient() { return httpClient; }
+    public HttpClientOptions getHttpClientOptions() { return httpClientOptions; }
+    public void setHttpClient(HttpClient httpClient, HttpClientOptions options) {
+        this.httpClient = httpClient;
+        this.httpClientOptions = options;
+    }
 
     private final Map<Method, RestMethodMetadata> methodMetadataCache = new HashMap<>();
 
-    RestInvocationHandler(Class<?> restInterface, String url, ClientConfig config) {
+    public RestInvocationHandler(Class<?> restInterface, String url, ClientConfig config) {
         this.intfacePath = restInterface.getAnnotation(Path.class).value();
         this.baseUrl = url;
 
@@ -107,8 +115,8 @@ public class RestInvocationHandler implements InvocationHandler {
     }
 
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        HttpClient httpClient = this.config.getHttpClient();
-        if (null == httpClient) {
+
+        if (null == this.httpClient) {
             String msg = "[RestInvocationHandler] httpclient is null";
             try {
                 String thName = Thread.currentThread().getName();
@@ -144,15 +152,21 @@ public class RestInvocationHandler implements InvocationHandler {
             // synchronized (lock) {
                 long fetchStartTs = 0;
                 Handler<HttpClientResponse> httpRespHandler = httpResp -> {
+
+                    String threadName = Thread.currentThread().getName();
+
+                    System.out.println(threadName + " HttpClientResponse " + httpResp.statusCode());
+
                     if (httpResp.statusCode() != 200) {
                         System.err.println("fail");
                     }
                     httpResp.bodyHandler(buffer -> {
+                        String threadName2 = Thread.currentThread().getName();
                         final long elapsedMillis = System.currentTimeMillis() - fetchStartTs;
-                        System.out.println(String.format("# [RestInvocationHandler] elapsed:[%d] len:%s", elapsedMillis, buffer.length()));
+                        System.out.println(String.format("%s # [RestInvocationHandler] elapsed:[%d] len:%s", threadName2, elapsedMillis, buffer.length()));
 
                         String respBody = buffer.getString(0, buffer.length());
-                        System.out.println("# [RestInvocationHandler] resp:" + respBody);
+                        System.out.println(String.format("%s # [RestInvocationHandler] resp:%s", threadName, respBody));
 
                         InvocationResult invocationResult = new InvocationResult(respBody, httpResp.statusCode());
                         try {
@@ -215,18 +229,48 @@ public class RestInvocationHandler implements InvocationHandler {
 
         Map<String, String> headers = invocation.getHttpHeadersFromParams();
 
-        HttpClient client = this.config.getHttpClient();
-        HttpClientRequest request = client.requestAbs(vertxMethod, invocation.getInvocationUrl());
+        /** apply proxy host and port */
+
+        if (null == this.config) {
+            throw new RuntimeException("config is null");
+        }
+
+        String proxyHost = this.config.getProxyHost();
+        Integer proxyPort = this.config.getProxyPort();
+
+        if (null != proxyHost) {
+            if (null != this.httpClientOptions) {
+                ProxyOptions proxyOptions = this.httpClientOptions.getProxyOptions();
+                if (null != proxyOptions) {
+                    proxyOptions.setHost(proxyHost);
+                    proxyOptions.setPort(proxyPort);
+                }
+            }
+        }
+
+        HttpClient client = this.httpClient;
+        String url = invocation.getInvocationUrl();
+        String threadName = Thread.currentThread().getName();
+        System.out.println(threadName + " invoking url: " + url);
+        HttpClientRequest request = client.requestAbs(vertxMethod, url);
         request.handler(handler);
+        request.exceptionHandler(throwable -> {
+            throwable.printStackTrace();
+        });
+        request.exceptionHandler(throwable -> {
+           throwable.printStackTrace();
+        });
 
         for (String hk : headers.keySet()) {
+            System.out.println("set header " + hk + " = " +headers.get(hk));
             request.putHeader(hk, headers.get(hk));
         }
         int contentLength = (requestBody == null)? 0 : requestBody.length();
         request.putHeader("Content-Length", Integer.toString(contentLength));
         if (contentLength > 0) {
-            request.end(Buffer.buffer(requestBody.getBytes(Charset.forName("UTF-8"))));
+            request.write(Buffer.buffer(requestBody.getBytes(Charset.forName("UTF-8"))));
         }
+        request.end();
 
         // return httpTemplate.send(invocation.getInvocationUrl(), requestBody, invocation.getAllHttpHeaders(), methodMetadata.getHttpMethod());
     }

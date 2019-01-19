@@ -47,6 +47,10 @@ public final class RestProxyFactory {
         return createProxy(restInterface, wrap(new RestInvocationHandler(restInterface, baseUrl, config), interceptors));
     }
 
+    public static <I> I createProxy(Class<I> restInterface, String baseUrl, ClientConfig config, RestInvocationHandler handler, Interceptor... interceptors) {
+        return createProxy(restInterface, wrap(handler, interceptors));
+    }
+
     static InvocationHandler wrap(InvocationHandler handler, Interceptor... interceptors) {
         for (Interceptor interceptor : interceptors) {
             handler = new InterceptedInvocationHandler(interceptor, handler);
