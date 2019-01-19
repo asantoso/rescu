@@ -4,6 +4,7 @@ package si.mazi.rescu;
  * @see RestProxyFactory
  */
 public interface IRestProxyFactory {
+
   /**
    * @see RestProxyFactory#createProxy(Class, String, ClientConfig, Interceptor...)
    */
