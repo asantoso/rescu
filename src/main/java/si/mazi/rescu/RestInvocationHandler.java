@@ -61,15 +61,21 @@ public class RestInvocationHandler implements InvocationHandler {
     private String intfacePath;
     private String baseUrl;
     private ClientConfig config;
-    private HttpClient httpClient;
-    private HttpClientOptions httpClientOptions;
+    volatile private HttpClient httpClient;
+    volatile private HttpClientOptions httpClientOptions;
 
     public HttpClient getHttpClient() { return httpClient; }
-    public HttpClientOptions getHttpClientOptions() { return httpClientOptions; }
     public void setHttpClient(HttpClient httpClient, HttpClientOptions options) {
         this.httpClient = httpClient;
         this.httpClientOptions = options;
     }
+
+    public HttpClientOptions getHttpClientOptions() { return httpClientOptions; }
+    public void setHttpClientOptions(HttpClientOptions options) {
+        System.out.println("set http client options " + options.getProxyOptions().getUsername());
+        this.httpClientOptions = options;
+    }
+
 
     private final Map<Method, RestMethodMetadata> methodMetadataCache = new HashMap<>();
 
@@ -150,7 +156,7 @@ public class RestInvocationHandler implements InvocationHandler {
 //        }
         try {
             // synchronized (lock) {
-                long fetchStartTs = 0;
+                long fetchStartTs = System.currentTimeMillis();
                 Handler<HttpClientResponse> httpRespHandler = httpResp -> {
 
                     String threadName = Thread.currentThread().getName();
@@ -248,10 +254,15 @@ public class RestInvocationHandler implements InvocationHandler {
             }
         }
 
+        ProxyOptions proxyOptions = this.httpClientOptions.getProxyOptions();
+
         HttpClient client = this.httpClient;
+
         String url = invocation.getInvocationUrl();
         String threadName = Thread.currentThread().getName();
         System.out.println(threadName + " invoking url: " + url);
+        System.out.println(String.format("# using proxy-host=%s proxy-port=%s username=%s", proxyOptions.getHost(), proxyOptions.getPort(), proxyOptions.getUsername()));
+
         HttpClientRequest request = client.requestAbs(vertxMethod, url);
         request.handler(handler);
         request.exceptionHandler(throwable -> {

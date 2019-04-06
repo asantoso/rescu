@@ -91,15 +91,14 @@ public class RestMethodMetadata implements Serializable {
          *  find the response type
          **/
 
-        Type responseType = null; // method.getGenericReturnType();
-
+//        Type responseType = method.getGenericReturnType();
+        Type responseType = null;
         Type[] types = method.getGenericParameterTypes();
         //Now assuming that the first parameter to the method is of type List<Integer>
         ParameterizedType lastParamType = (ParameterizedType) types[types.length - 1];
         responseType = lastParamType.getActualTypeArguments()[0];
-        System.out.println("RestMethodMetaData PARSED RESPONSE TYPE = " + responseType);
 
-        //
+        // System.out.println("RestMethodMetaData PARSED RESPONSE TYPE = " + responseType.getClass().getCanonicalName());
 
         Consumes consumes = AnnotationUtils.getFromMethodOrClass(method, Consumes.class);
         String reqContentType = consumes != null ? consumes.value()[0] : null;
